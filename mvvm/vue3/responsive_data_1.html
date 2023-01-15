@@ -1,0 +1,50 @@
+<!-- 响应式数据的优化: 解决副作用函数的名称必须是effect的问题 -->
+<!DOCTYPE html>
+<html lang="en">
+
+<body></body>
+
+</html>
+
+<script>
+    let activeEffect
+
+    function effect(fn) {
+        activeEffect = fn
+        fn()
+    }
+
+    const data = { 'text': 'hello world' }
+    const bucket = new Set()
+    const obj = new Proxy(data, {
+        get(target, key) {
+            if (activeEffect) {
+                bucket.add(activeEffect)
+            }
+            return target[key]
+        },
+        set(target, key, newVal) {
+            target[key] = newVal
+            bucket.forEach(fn => fn())
+            return true
+        }
+    })
+
+    effect(
+        // 副作用函数可以是一个匿名函数了
+        () => {
+            console.log('effect run')
+            document.body.innerHTML = obj.text
+        }
+    )
+
+    setTimeout(() => {
+        obj.text = 'hello vue3'
+    }, 5000)
+
+    //  额外问题：响应式数据和副作用函数关联的应该是obj.text
+    //  但是设置一个obj中不存在的属性时，也会执行副作用函数
+    // setTimeout(() => {
+    //     obj.not_exist = 'hello vue3'
+    // }, 5000)
+</script>
