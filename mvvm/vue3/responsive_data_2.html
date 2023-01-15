@@ -1,0 +1,62 @@
+<!-- 响应式数据的优化:  副作用函数和具体的属性关联-->
+<!DOCTYPE html>
+<html lang="en">
+
+<body></body>
+
+</html>
+
+<script>
+    let activeEffect
+
+    function effect(fn) {
+        activeEffect = fn
+        fn()
+    }
+
+    const data = { 'text': 'hello world' }
+    // 现在数据结构变为两层：
+    //  1. WeakMap， 键是target(原始数据对象)， value是一个Map
+    //  2. Map,   键是key(要访问的属性)，value是一个Set(存储具体的关联的副作用函数)
+    // 使用WeakMap而非Map是为了不干扰垃圾回收，target没有引用了就可以被回收掉了
+    const bucket = new WeakMap()
+    const obj = new Proxy(data, {
+        get(target, key) {
+            if (!activeEffect) return target[key]
+            let depsMap = bucket.get(target)
+            if (!depsMap) {
+                bucket.set(target, (depsMap = new Map()))
+            }
+            let deps = depsMap.get(key)
+            if (!deps) {
+                depsMap.set(key, (deps = new Set()))
+            }
+            deps.add(activeEffect)
+            return target[key]
+        },
+        set(target, key, newVal) {
+            target[key] = newVal
+            const depsMap = bucket.get(target)
+            if (!depsMap) return
+            const effects = depsMap.get(key)
+            effects && effects.forEach(fn => fn())
+            return true
+        }
+    })
+
+    effect(
+        () => {
+            console.log('effect run')
+            document.body.innerHTML = obj.text
+        }
+    )
+
+    // setTimeout(() => {
+    //     obj.text = 'hello vue3'
+    // }, 5000)
+
+    //  修改其他属性时，不会再执行副作用函数
+    setTimeout(() => {
+        obj.not_exist = 'hello vue3'
+    }, 5000)
+</script>
