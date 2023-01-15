@@ -1,0 +1,40 @@
+<!-- 响应式数据的基本实现 -->
+<!DOCTYPE html>
+<html lang="en">
+
+<body></body>
+
+</html>
+
+<script>
+    // 副作用函数：能读取或设置body，但除了effect，其他函数也能设置body，所以effect产生了副作用
+    function effect() {
+        document.body.innerHTML = obj.text
+    }
+    // 原始数据
+    const data = { 'text': 'hello world' }
+    // 存储副作用函数的桶
+    const bucket = new Set()
+    // 响应式数据：当obj的值发生变化时，副作用函数能重新执行，那么obj就是响应式数据
+    const obj = new Proxy(data, {
+        get(target, key) {
+            // 添加副作用函数到桶里
+            bucket.add(effect)
+            return target[key]
+        },
+        set(target, key, newVal) {
+            target[key] = newVal
+            // 拦截设置对象操作，使其能执行副作用函数，达成数据的响应式
+            bucket.forEach(fn => fn())
+            return true
+        }
+    })
+
+    // 执行副作用函数的同时会触发obj的读取操作，把副作用函数放到桶里
+    effect()
+
+    setTimeout(() => {
+        // 触发obj的修改操作，执行副作用函数
+        obj.text = 'hello vue3'
+    }, 5000)
+</script>
