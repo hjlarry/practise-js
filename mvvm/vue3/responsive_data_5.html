@@ -1,0 +1,105 @@
+<!-- 响应式数据的优化: effect的嵌套 -->
+<!DOCTYPE html>
+<html lang="en">
+
+<body></body>
+
+</html>
+
+<script>
+    let activeEffect
+    const effectStack = []
+
+    function effect(fn) {
+        const effectFn = () => {
+            cleanup(effectFn)
+            activeEffect = effectFn
+            effectStack.push(effectFn)
+            fn()
+            effectStack.pop()
+            activeEffect = effectStack[effectStack.length-1]
+        }
+        effectFn.deps = []
+        effectFn()
+    }
+
+    function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+            const deps = effectFn.deps[i]
+            deps.delete(effectFn)
+        }
+        effectFn.deps.length = 0
+    }
+
+
+    const bucket = new WeakMap()
+    function track(target, key) {
+        if (!activeEffect) return
+        let depsMap = bucket.get(target)
+        if (!depsMap) {
+            bucket.set(target, (depsMap = new Map()))
+        }
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+        deps.add(activeEffect)
+        activeEffect.deps.push(deps)
+    }
+
+    function trigger(target, key) {
+        const depsMap = bucket.get(target)
+        if (!depsMap) return
+        const effects = depsMap.get(key)
+        const effectsToRun = new Set(effects)
+        effectsToRun.forEach(fn => fn())
+    }
+
+    const data = { foo: true, bar: true}
+
+    const obj = new Proxy(data, {
+        get(target, key) {
+            track(target, key)
+            return target[key]
+        },
+        set(target, key, newVal) {
+            target[key] = newVal
+            trigger(target, key)
+            return true
+        }
+    })
+    /** 
+    要解决的问题：
+    effect是有可能发生嵌套的，比如组件的渲染函数就是副作用函数，那么子组件就是其嵌套，例：
+    const Foo = {
+        render(){
+            return <Bar />
+        },
+    }
+    相当于:
+    effect(()=>{
+        Foo.render()
+        effect(()=>{
+            Bar.render()
+        })
+    })
+
+    **/
+    
+    // 构建测试场景，发现未做任何修改时，无论修改哪个属性，只有副作用函数effectFn2会执行
+    // 原因是之前用全局变量activeEffect存储副作用函数时同一时刻只能存储一个，所以我们新增栈来存储
+    let temp1, temp2
+    effect( function effectFn1(){
+        console.log("effectFn1 run")
+        effect(function effectFn2(){
+            console.log("effectFn2 run")
+            temp2 = obj.bar
+        })
+        temp1 = obj.foo
+    })
+
+    setTimeout(() => {
+        obj.foo = false
+        // obj.bar = false
+    }, 5000)
+</script>
