@@ -1,0 +1,164 @@
+<!-- 响应式数据: watch的优化 -->
+<!DOCTYPE html>
+<html lang="en">
+
+<body></body>
+
+</html>
+
+<script>
+    let activeEffect
+    const effectStack = []
+
+    function effect(fn, options = {}) {
+        const effectFn = () => {
+            cleanup(effectFn)
+            activeEffect = effectFn
+            effectStack.push(effectFn)
+            const res = fn()
+            effectStack.pop()
+            activeEffect = effectStack[effectStack.length - 1]
+            return res
+        }
+        effectFn.options = options
+        effectFn.deps = []
+        if (!options.lazy) {
+            effectFn()
+        }
+        return effectFn
+    }
+
+    function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+            const deps = effectFn.deps[i]
+            deps.delete(effectFn)
+        }
+        effectFn.deps.length = 0
+    }
+
+
+    const bucket = new WeakMap()
+
+    function track(target, key) {
+        if (!activeEffect) return
+        let depsMap = bucket.get(target)
+        if (!depsMap) {
+            bucket.set(target, (depsMap = new Map()))
+        }
+        let deps = depsMap.get(key)
+        if (!deps) {
+            depsMap.set(key, (deps = new Set()))
+        }
+        deps.add(activeEffect)
+        activeEffect.deps.push(deps)
+    }
+
+    function trigger(target, key) {
+        const depsMap = bucket.get(target)
+        if (!depsMap) return
+        const effects = depsMap.get(key)
+        const effectsToRun = new Set()
+        effects && effects.forEach(effectFn => {
+            if (effectFn !== activeEffect) {
+                effectsToRun.add(effectFn)
+            }
+        })
+        effectsToRun.forEach(fn => {
+            if (fn.options.scheduler) {
+                fn.options.scheduler(fn)
+            } else {
+                fn()
+            }
+        })
+    }
+
+    const data = {foo: 1, bar: 2}
+
+    const obj = new Proxy(data, {
+        get(target, key) {
+            track(target, key)
+            return target[key]
+        },
+        set(target, key, newVal) {
+            target[key] = newVal
+            trigger(target, key)
+            return true
+        }
+    })
+
+    function computed(getter) {
+        let value
+        let dirty = true
+        const effectFn = effect(
+            getter,
+            {
+                lazy: true,
+                scheduler() {
+                    if (!dirty) {
+                        dirty = true
+                        trigger(obj, 'value')
+                    }
+                }
+            }
+        )
+        const obj = {
+            get value() {
+                if (dirty) {
+                    value = effectFn()
+                    dirty = false
+                }
+                track(obj, 'value')
+                return value
+            }
+        }
+        return obj
+    }
+
+    function watch(source, cb) {
+        let getter
+        if (typeof source === 'function') {
+            getter = source
+        } else {
+            getter = () => traverse(source)
+        }
+        let oldValue, newValue
+        const effectFn = effect(
+            () => getter(),
+            {
+                lazy: true,
+                scheduler() {
+                    // 在调度器中执行副作用函数时，得到的是新值
+                    newValue = effectFn()
+                    cb(newValue, oldValue)
+                    // 更新旧值，否则下次会得到错误的旧值
+                    oldValue = newValue
+                }
+            })
+        // 手动调用副作用函数，拿到的就是旧值
+        oldValue = effectFn()
+    }
+
+    function traverse(value, seen = new Set()) {
+        if (typeof value !== 'object' || value === null) return
+        seen.add(value)
+        for (const key in value) {
+            traverse(value[key], seen)
+        }
+        return value
+    }
+
+    /**
+     要解决的问题：
+     1. 支持watch一个getter函数
+     2. 支持watch对象变化前后的新旧值
+     **/
+    watch(
+        // getter函数
+        () => obj.foo,
+        (newValue, oldValue) => {
+            console.log('watch run, data changed')
+            console.log(`new value: ${newValue}, old value: ${oldValue}`)
+        })
+    obj.foo++
+
+</script>
