@@ -11,8 +11,9 @@
     function effect() {
         document.body.innerHTML = obj.text
     }
+
     // 原始数据
-    const data = { 'text': 'hello world' }
+    const data = {'text': 'hello world'}
     // 存储副作用函数的桶
     const bucket = new Set()
     // 响应式数据：当obj的值发生变化时，副作用函数能重新执行，那么obj就是响应式数据

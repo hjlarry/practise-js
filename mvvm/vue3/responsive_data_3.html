@@ -16,6 +16,7 @@
 
 
     const bucket = new WeakMap()
+
     function track(target, key) {
         if (!activeEffect) return
         let depsMap = bucket.get(target)
@@ -36,7 +37,7 @@
         effects && effects.forEach(fn => fn())
     }
 
-    const data = { 'text': 'hello world' }
+    const data = {'text': 'hello world'}
 
     const obj = new Proxy(data, {
         get(target, key) {

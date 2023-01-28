@@ -29,6 +29,7 @@
 
 
     const bucket = new WeakMap()
+
     function track(target, key) {
         if (!activeEffect) return
         let depsMap = bucket.get(target)
@@ -52,7 +53,7 @@
         effectsToRun.forEach(fn => fn())
     }
 
-    const data = { ok: true, text: 'hello world' }
+    const data = {ok: true, text: 'hello world'}
 
     const obj = new Proxy(data, {
         get(target, key) {
@@ -65,26 +66,26 @@
             return true
         }
     })
-    /** 
-    要解决的问题：
-    当obj.ok的值变化时，代码执行的分支也会切换
-    ok为true时，text和ok两个属性都收集了副作用函数
-    但当ok为false时，分支已切换，text属性不应该再执行和收集副作用函数
+    /**
+     要解决的问题：
+     当obj.ok的值变化时，代码执行的分支也会切换
+     ok为true时，text和ok两个属性都收集了副作用函数
+     但当ok为false时，分支已切换，text属性不应该再执行和收集副作用函数
 
-    解决方案：
-    每次副作用函数重新执行前，先清除上一次的响应联系。而当副作用函数重新执行后，再建立新的响应联系
+     解决方案：
+     每次副作用函数重新执行前，先清除上一次的响应联系。而当副作用函数重新执行后，再建立新的响应联系
 
-    完整的执行步骤：
-    1. 用户初次执行effect，传入匿名副作用函数
-    2. effect内不直接执行该传入的函数，而是新建一个闭包effectFn函数，并为其增加了deps数组，之后用其存储所有包含当前副作用函数的依赖集合
-    3. 执行effectFn函数，并执行传入的匿名副作用函数，此时deps数组是空了，cleanup函数实际上是没执行的
-    4. 匿名副作用函数内读取了obj.ok和obj.text，那么就会调用相应的track函数
-    5. track内，把effectFn函数添加到了bucket['data']['ok']和bucket['data']['text']这两个set中去，同时这两个set也被添加至effectFn的deps数组中
-    6. 5秒后，先修改obj.ok，触发trigger函数，trigger中拿到bucket['data']['ok']中的effectFn
-    7. effectFn再次执行时先触发cleanup，它先把bucket['data']['ok']和bucket['data']['text']中的effectFn函数删掉，再把effectFn的deps数组内容清空
-    8. 然后执行匿名副作用函数时，obj.ok已经是false，不会执行text的读取
-    9. ok的读取使得effectFn函数再次添加到了bucket['data']['ok']中，从步骤4再次执行，成功切换了分支
-    **/
+     完整的执行步骤：
+     1. 用户初次执行effect，传入匿名副作用函数
+     2. effect内不直接执行该传入的函数，而是新建一个闭包effectFn函数，并为其增加了deps数组，之后用其存储所有包含当前副作用函数的依赖集合
+     3. 执行effectFn函数，并执行传入的匿名副作用函数，此时deps数组是空了，cleanup函数实际上是没执行的
+     4. 匿名副作用函数内读取了obj.ok和obj.text，那么就会调用相应的track函数
+     5. track内，把effectFn函数添加到了bucket['data']['ok']和bucket['data']['text']这两个set中去，同时这两个set也被添加至effectFn的deps数组中
+     6. 5秒后，先修改obj.ok，触发trigger函数，trigger中拿到bucket['data']['ok']中的effectFn
+     7. effectFn再次执行时先触发cleanup，它先把bucket['data']['ok']和bucket['data']['text']中的effectFn函数删掉，再把effectFn的deps数组内容清空
+     8. 然后执行匿名副作用函数时，obj.ok已经是false，不会执行text的读取
+     9. ok的读取使得effectFn函数再次添加到了bucket['data']['ok']中，从步骤4再次执行，成功切换了分支
+     **/
     effect(
         () => {
             console.log('effect fn run!')

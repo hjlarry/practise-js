@@ -14,7 +14,7 @@
         fn()
     }
 
-    const data = { 'text': 'hello world' }
+    const data = {'text': 'hello world'}
     // 现在数据结构变为两层：
     //  1. WeakMap， 键是target(原始数据对象)， value是一个Map
     //  2. Map,   键是key(要访问的属性)，value是一个Set(存储具体的关联的副作用函数)
