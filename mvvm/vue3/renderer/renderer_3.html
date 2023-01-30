@@ -1,4 +1,4 @@
-<!--渲染器：挂载操作-->
+<!--渲染器：挂载重构，不再依赖于浏览器的特有API，传入不同配置就能渲染非浏览器-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,22 +11,25 @@
 </body>
 <script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
 <script>
-    function createRenderer() {
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert,
+        } = options
+
         function mountElement(vnode, container) {
-            const el = document.createElement(vnode.type)
-            // 如果子节点是字符串，代表该元素具有文本节点，需设置其textContent
+            const el = createElement(vnode.type)
             if (typeof vnode.children === 'string') {
-                el.textContent = vnode.children
+                setElementText(el, vnode.children)
             }
-            container.appendChild(el)
+            insert(el, container)
         }
 
         function patch(n1, n2, container) {
-            // n1不存在，说明是挂载操作
             if (!n1) {
                 mountElement(n2, container)
             } else {
-            // n1存在，说明是补丁操作
             }
         }
 
@@ -52,7 +55,17 @@
         children: 'hello world',
     }
 
-    const renderer = createRenderer()
+    const renderer = createRenderer({
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+    })
     renderer.render(vnode, document.querySelector('#app'))
 </script>
 </html>
