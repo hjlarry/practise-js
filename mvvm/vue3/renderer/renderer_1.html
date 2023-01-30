@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="app">
+</div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    function createRenderer() {
+        // 打补丁
+        function patch(n1, n2, container){
+
+        }
+        function render(vnode, container) {
+            if(vnode){
+                // 有新的vnode，需要将其和旧的vnode传给patch函数打补丁
+                patch(container._vnode, vnode, container)
+            }else{
+                // 没有新的vnode，但旧的vnode存在，说明是卸载操作
+                if(container._vnode){
+                    container.innerHTML = ''
+                }
+            }
+            // 存储vnode，便于下次渲染时，可以拿到旧的vnode
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+
+        }
+
+        return {render, hydrate}
+    }
+
+
+    const renderer = createRenderer()
+    // 首次渲染
+    renderer.render(vnode1, document.querySelector('#app'))
+    // 第二次渲染
+    renderer.render(vnode2, document.querySelector('#app'))
+    // 第三次渲染
+    renderer.render(null, document.querySelector('#app'))
+</script>
+</html>
