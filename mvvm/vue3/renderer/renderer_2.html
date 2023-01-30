@@ -1,0 +1,58 @@
+<!--渲染器：挂载操作-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="app">
+</div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    function createRenderer() {
+        function mountElement(vnode, container) {
+            const el = document.createElement(vnode.type)
+            // 如果子节点是字符串，代表该元素具有文本节点，需设置其textContent
+            if (typeof vnode.childern === 'string') {
+                el.textContent = vnode.childern
+            }
+            container.appendChild(el)
+        }
+
+        function patch(n1, n2, container) {
+            // n1不存在，说明是挂载操作
+            if (!n1) {
+                mountElement(n2, container)
+            } else {
+            // n1存在，说明是补丁操作
+            }
+        }
+
+        function render(vnode, container) {
+            if (vnode) {
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    container.innerHTML = ''
+                }
+            }
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+        }
+
+        return {render, hydrate}
+    }
+
+    const vnode = {
+        type: 'h1',
+        childern: 'hello world',
+    }
+
+    const renderer = createRenderer()
+    renderer.render(vnode, document.querySelector('#app'))
+</script>
+</html>
