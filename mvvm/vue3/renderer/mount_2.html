@@ -1,0 +1,128 @@
+<!--渲染器：优化vnode的props-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="app">
+</div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert,
+            patchProps,
+        } = options
+
+        function mountElement(vnode, container) {
+            const el = createElement(vnode.type)
+            if (typeof vnode.children === 'string') {
+                setElementText(el, vnode.children)
+            } else if (Array.isArray(vnode.children)) {
+                vnode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+
+            if (vnode.props) {
+                for (const key in vnode.props) {
+                    const value = vnode.props[key]
+                    patchProps(el, key, null, value)
+                }
+            }
+            insert(el, container)
+        }
+
+        function patch(n1, n2, container) {
+            if (!n1) {
+                mountElement(n2, container)
+            } else {
+            }
+        }
+
+        function render(vnode, container) {
+            if (vnode) {
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    container.innerHTML = ''
+                }
+            }
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+        }
+
+        return {render, hydrate}
+    }
+
+
+
+    const vnode = {
+        type: 'div',
+        props: {
+            id: 'foo'
+        },
+        children: [
+            {
+                type: 'button',
+                props: {
+                    disabled: ''
+                },
+                children: 'hello world',
+            },
+            // 例如，<button :disabled="false">btn2</button>
+            // 用户的本意是不禁用，编译后就是如下代码
+            {
+                type: 'button',
+                props: {
+                    disabled: false
+                },
+                children: 'btn2',
+            }
+        ],
+    }
+
+    // 判断能否直接设置DOM Properties
+    // 特殊处理<input form='form1' />
+    // 因为其对用的DOM属性是el.form，是一个只读属性，也需要用setAttribute去设置
+    function shouldSetAsProps(el, key, value) {
+        if (key === 'form' && el.tagName === 'INPUT') return false
+        return key in el
+    }
+
+    const renderer = createRenderer({
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+        patchProps(el, key, prevValue, nextValue) {
+            // 先判断key是否存在对应的DOM Properties
+            if (shouldSetAsProps(el, key, nextValue)) {
+                const type = typeof el[key]
+                // 矫正示例中disabled:false的情况
+                if (type === 'boolean' && nextValue === '') {
+                    el[key] = true
+                } else {
+                    el[key] = nextValue
+                }
+            } else {
+                // key没有对应的DOM Properties，就用setAttribute设置属性
+                el.setAttribute(key, vnode.props[key])
+            }
+        }
+    })
+    renderer.render(vnode, document.querySelector('#app'))
+</script>
+</html>
