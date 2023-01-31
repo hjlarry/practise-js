@@ -1,0 +1,91 @@
+<!--渲染器：处理vnode的props-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="app">
+</div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert,
+        } = options
+
+        function mountElement(vnode, container) {
+            const el = createElement(vnode.type)
+            if (typeof vnode.children === 'string') {
+                setElementText(el, vnode.children)
+            } else if (Array.isArray(vnode.children)) {
+                vnode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+            // 处理vnode的props
+            if (vnode.props){
+                for(const key in vnode.props){
+                    // 既可以使用setAttribute，也可以直接使用el[key]直接设置，两种方式各有缺陷
+                    el.setAttribute(key, vnode.props[key])
+                //  el[key] = vnode.props[key]
+                }
+            }
+            insert(el, container)
+        }
+
+        function patch(n1, n2, container) {
+            if (!n1) {
+                mountElement(n2, container)
+            } else {
+            }
+        }
+
+        function render(vnode, container) {
+            if (vnode) {
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    container.innerHTML = ''
+                }
+            }
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+        }
+
+        return {render, hydrate}
+    }
+
+    const vnode = {
+        type: 'div',
+        props: {
+            id: 'foo'
+        },
+        children: [
+            {
+                type: 'h1',
+                children: 'hello world',
+            }
+        ],
+    }
+
+    const renderer = createRenderer({
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+    })
+    renderer.render(vnode, document.querySelector('#app'))
+</script>
+</html>
