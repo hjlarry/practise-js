@@ -1,0 +1,136 @@
+<!--渲染器：卸载操作-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="app">
+</div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert,
+            patchProps,
+        } = options
+
+        function mountElement(vnode, container) {
+            // 把真实的dom元素也挂在vnode上
+            const el = vnode.el = createElement(vnode.type)
+            if (typeof vnode.children === 'string') {
+                setElementText(el, vnode.children)
+            } else if (Array.isArray(vnode.children)) {
+                vnode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+
+            if (vnode.props) {
+                for (const key in vnode.props) {
+                    const value = vnode.props[key]
+                    patchProps(el, key, null, value)
+                }
+            }
+            insert(el, container)
+        }
+
+        function unmount(vnode) {
+            const parent = vnode.el.parentNode
+            if (parent) {
+                parent.removeChild(vnode.el)
+            }
+        }
+
+        function patch(n1, n2, container) {
+            if (!n1) {
+                mountElement(n2, container)
+            } else {
+            }
+        }
+
+        function render(vnode, container) {
+            if (vnode) {
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    // 卸载时直接清空并不严谨，因为：
+                    // 1. 容器的内容可能有其他组件，应该调用这些组件的生命周期函数
+                    // 2. 有的元素可能有自定义指令,应正确执行对应的指令钩子函数
+                    // 3. innerHTML不会移除绑定在DOM元素上的事件处理函数
+                    // 现在unmount函数先解决问题3
+                    // container.innerHTML = ''
+                    unmount(container._vnode)
+                }
+            }
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+        }
+
+        return {render, hydrate}
+    }
+
+
+    const vnode = {
+        type: 'div',
+        props: {
+            id: 'foo'
+        },
+        children: [
+            {
+                type: 'button',
+                props: {
+                    disabled: ''
+                },
+                children: 'hello world',
+            },
+            {
+                type: 'button',
+                props: {
+                    disabled: false
+                },
+                children: 'btn2',
+            }
+        ],
+    }
+
+    function shouldSetAsProps(el, key, value) {
+        if (key === 'form' && el.tagName === 'INPUT') return false
+        return key in el
+    }
+
+    const renderer = createRenderer({
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+        patchProps(el, key, prevValue, nextValue) {
+            if (shouldSetAsProps(el, key, nextValue)) {
+                const type = typeof el[key]
+                if (type === 'boolean' && nextValue === '') {
+                    el[key] = true
+                } else {
+                    el[key] = nextValue
+                }
+            } else {
+                el.setAttribute(key, vnode.props[key])
+            }
+        }
+    })
+    // 初次挂载
+    renderer.render(vnode, document.querySelector('#app'))
+    // 再次挂载null，意味着卸载之前的渲染内容
+    renderer.render(null, document.querySelector('#app'))
+</script>
+</html>
