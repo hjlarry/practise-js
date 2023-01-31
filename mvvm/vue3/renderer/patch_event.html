@@ -1,0 +1,137 @@
+<!--渲染器：处理挂载时元素上的事件-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="app">
+</div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert,
+            patchProps,
+        } = options
+
+        function mountElement(vnode, container) {
+            const el = vnode.el = createElement(vnode.type)
+            if (typeof vnode.children === 'string') {
+                setElementText(el, vnode.children)
+            } else if (Array.isArray(vnode.children)) {
+                vnode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+
+            if (vnode.props) {
+                for (const key in vnode.props) {
+                    const value = vnode.props[key]
+                    patchProps(el, key, null, value)
+                }
+            }
+            insert(el, container)
+        }
+
+        function unmount(vnode) {
+            const parent = vnode.el.parentNode
+            if (parent) {
+                parent.removeChild(vnode.el)
+            }
+        }
+
+        function patch(n1, n2, container) {
+            // 要挂载的新节点和旧节点类型不同时,没有更新的意义,应该先卸载旧节点
+            if (n1 && n1.type !== n2.type) {
+                unmount(n1)
+                n1 = null
+            }
+
+            const {type} = n2
+            // 普通标签元素
+            if (typeof type === 'string') {
+                if (!n1) {
+                    mountElement(n2, container)
+                } else {
+                    //     更新
+                }
+            } else if (typeof type === 'object') {
+                //     说明n2是组件,要用组件的更新方式
+            } else if (type === 'xxx') {
+                //     其他类型做特殊处理
+            }
+
+        }
+
+        function render(vnode, container) {
+            if (vnode) {
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    unmount(container._vnode)
+                }
+            }
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+        }
+
+        return {render, hydrate}
+    }
+
+
+    const vnode = {
+        type: 'div',
+        props: {
+            id: 'foo',
+            onClick: () => {
+                alert("clicked!")
+            }
+        },
+        children: "hello"
+    }
+
+
+    function shouldSetAsProps(el, key, value) {
+        if (key === 'form' && el.tagName === 'INPUT') return false
+        return key in el
+    }
+
+    const renderer = createRenderer({
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+        patchProps(el, key, prevValue, nextValue) {
+            // 匹配on开头的属性，视为事件
+            if (/^on/.test(key)) {
+                // 得到事件名称
+                const name = key.slice(2).toLowerCase()
+                // 绑定事件，nextValue是事件处理函数
+                el.addEventListener(name, nextValue)
+            } else if (shouldSetAsProps(el, key, nextValue)) {
+                const type = typeof el[key]
+                if (type === 'boolean' && nextValue === '') {
+                    el[key] = true
+                } else {
+                    el[key] = nextValue
+                }
+            } else {
+                el.setAttribute(key, vnode.props[key])
+            }
+        }
+    })
+    renderer.render(vnode, document.querySelector('#app'))
+</script>
+</html>
