@@ -1,0 +1,404 @@
+<!--组件化：组件props及子组件的被动更新-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<div id="app">
+</div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    const {reactive, effect, shallowReactive} = VueReactivity
+
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert,
+            createText,
+            setText,
+            patchProps,
+        } = options
+
+        function mountElement(vnode, container, anchor) {
+            const el = vnode.el = createElement(vnode.type)
+            if (typeof vnode.children === 'string') {
+                setElementText(el, vnode.children)
+            } else if (Array.isArray(vnode.children)) {
+                vnode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+
+            if (vnode.props) {
+                for (const key in vnode.props) {
+                    const value = vnode.props[key]
+                    patchProps(el, key, null, value)
+                }
+            }
+            insert(el, container, anchor)
+        }
+
+        const Fragment = Symbol()
+
+        function unmount(vnode) {
+            if (vnode.type === Fragment) {
+                vnode.children.forEach(child => {
+                    unmount(child)
+                })
+                return
+            }
+            const parent = vnode.el.parentNode
+            if (parent) {
+                parent.removeChild(vnode.el)
+            }
+        }
+
+        function patchElement(n1, n2) {
+            const el = n2.el = n1.el
+            const oldProps = n1.props
+            const newProps = n2.props
+            for (const key in newProps) {
+                if (newProps[key] !== oldProps[key]) {
+                    patchProps(el, key, oldProps[key], newProps[key])
+                }
+            }
+            for (const key in oldProps) {
+                if (!(key in newProps)) {
+                    patchProps(el, key, oldProps[key], null)
+                }
+            }
+            patchChildren(n1, n2, el)
+        }
+
+        function patchChildren(n1, n2, container) {
+            if (typeof n2.children === 'string') {
+                if (Array.isArray(n1.children)) {
+                    n1.children.forEach(child => {
+                        unmount(child)
+                    })
+                }
+                setElementText(container, n2.children)
+            } else if (Array.isArray(n2.children)) {
+                const oldChildren = n1.children
+                const newChildren = n2.children
+                let lastIndex = 0
+                for (let i = 0; i < newChildren.length; i++) {
+                    const newVnode = newChildren[i]
+                    let find = false
+                    for (let j = 0; j < oldChildren.length; j++) {
+                        const oldVnode = oldChildren[j]
+                        if (newVnode.key === oldVnode.key) {
+                            find = true
+                            patch(oldVnode, newVnode, container)
+                            if (j < lastIndex) {
+                                const prevVnode = newChildren[i - 1]
+                                if (prevVnode) {
+                                    const anchor = prevVnode.el.nextSibling
+                                    insert(newVnode.el, container, anchor)
+                                }
+                            } else {
+                                lastIndex = j
+                            }
+                            break
+                        }
+                    }
+                    if (!find) {
+                        const prevVnode = newChildren[i - 1]
+                        let anchor = null
+                        if (prevVnode) {
+                            anchor = prevVnode.el.nextSibling
+                        } else {
+                            anchor = container.firstChild
+                        }
+                        patch(null, newVnode, container, anchor)
+                    }
+                }
+
+                for (let i = 0; i < oldChildren.length; i++) {
+                    const oldVnode = oldChildren[i]
+                    const has = newChildren.find(vnode => vnode.key === oldVnode.key)
+                    if (!has) {
+                        unmount(oldVnode)
+                    }
+                }
+            } else {
+                if (Array.isArray(n1.children)) {
+                    n1.children.forEach(child => {
+                        unmount(child)
+                    })
+                } else if (typeof n1.children === 'string') {
+                    setElementText(container, '')
+                }
+            }
+        }
+
+        function patch(n1, n2, container, anchor) {
+            if (n1 && n1.type !== n2.type) {
+                unmount(n1)
+                n1 = null
+            }
+
+            const {type} = n2
+            if (typeof type === 'string') {
+                if (!n1) {
+                    mountElement(n2, container, anchor)
+                } else {
+                    patchElement(n1, n2)
+                }
+            } else if (type === Text) {
+                if (!n1) {
+                    const el = n2.el = createText(n2.children)
+                    insert(el, container)
+                } else {
+                    const el = n2.el = n1.el
+                    if (n1.children !== n2.children) {
+                        setText(el, n2.children)
+                    }
+                }
+            } else if (type === Fragment) {
+                if (!n1) {
+                    n2.children.forEach(child => {
+                        patch(null, child, container)
+                    })
+                } else {
+                    patchChildren(n1, n2, container)
+                }
+            } else if (typeof type === 'object') {
+                if (!n1) {
+                    mountComponent(n2, container, anchor)
+                } else {
+                    patchComponent(n1, n2, anchor)
+                }
+            }
+        }
+
+        const queue = new Set()
+        let isFlushing = false
+        const p = Promise.resolve()
+
+        function queueJob(job) {
+            queue.add(job)
+            if (!isFlushing) {
+                isFlushing = true
+                p.then(() => {
+                    try {
+                        queue.forEach(job => job())
+                    } finally {
+                        isFlushing = false
+                        queue.clear = 0
+                    }
+                })
+            }
+        }
+
+        function resolveProps(options, propsData) {
+            const props = []
+            const attrs = []
+            // 遍历给组件传递过来的数据，如果是在组件自身的props中定义的，认为是合法的props，否则视为attrs
+            for (const key in propsData) {
+                if (key in options) {
+                    props[key] = propsData[key]
+                } else {
+                    attrs[key] = propsData[key]
+                }
+            }
+            return [props, attrs]
+        }
+
+        function mountComponent(vnode, container, anchor) {
+            const compoentOptions = vnode.type
+            const {
+                render,
+                data,
+                props: propsOption,
+                beforeCreate,
+                created,
+                beforeMounted,
+                mounted,
+                beforeUpdate,
+                updated
+            } = compoentOptions
+            beforeCreate && beforeCreate()
+
+            const state = reactive(data())
+            // 解析出最终的props数据
+            const [props, attrs] = resolveProps(propsOption, vnode.props)
+            const instance = {
+                state,
+                props: shallowReactive(props),
+                isMounted: false,
+                subtree: null
+            }
+            vnode.component = instance
+            // 创建一个渲染上下文对象，其本质是组件实例的代理
+            const renderContext = new Proxy(instance, {
+                get(t, k, r) {
+                    // 先尝试读取自身状态，读不到就在props中查找
+                    const {state, props} = t
+                    if (state && k in state) {
+                        return state[k]
+                    } else if (k in props) {
+                        return props[k]
+                    } else {
+                        console.error('not exist')
+                    }
+                },
+                set(t, k, v, r) {
+                    const {state, props} = t
+                    if (state && k in state) {
+                        state[k] = v
+                    } else if (k in props) {
+                        console.warn('prop is readonly')
+                    } else {
+                        console.error('not exist')
+                    }
+                }
+            })
+
+            // 生命周期函数、渲染函数等都绑定该上下文对象
+            created && created.call(renderContext)
+
+            effect(() => {
+                const subtree = render.call(renderContext)
+                if (!instance.isMounted) {
+                    beforeMounted && beforeMounted.call(renderContext)
+                    instance.isMounted = true
+                    patch(null, subtree, container, anchor)
+                    mounted && mounted.call(renderContext)
+                } else {
+                    beforeUpdate && beforeUpdate.call(renderContext)
+                    patch(instance.subtree, subtree, container, anchor)
+                    updated && updated.call(renderContext)
+                }
+                instance.subtree = subtree
+            }, {
+                scheduler: queueJob
+            })
+        }
+
+        // 父组件变更时，也会引起子组件的更新，这叫做子组件的被动更新
+        // 这时就要检测一下子组件是否真的需要更新，因为其props可能是不变的
+        function patchComponent(n1, n2, anchor) {
+            // 获取组件实例
+            const instance = (n2.component = n1.component)
+            // 获取当前props数据
+            const {props} = instance
+            // 检测为子组件传递的props是否有变化，没变化则不需更新
+            if (hasPropsChanged(n1.props, n2.props)) {
+                const [nextProps] = resolveProps(n2.type.props, n2.props)
+                // 更新props
+                for (const key in nextProps) {
+                    props[key] = nextProps[key]
+                }
+                // 删除不存在的props
+                for (const k in props) {
+                    if (!(k in nextProps)) {
+                        delete props[k]
+                    }
+                }
+            }
+
+        }
+
+        function hasPropsChanged(prevProps, nextProps) {
+            const nextKeys = Object.keys(nextProps)
+            // 长度不一样，肯定有变化
+            if (nextKeys.length !== Object.keys(prevProps).length) {
+                return true
+            }
+            // 长度一样，但是有一个key的值不一样，也是有变化的
+            for (let i = 0; i < nextKeys.length; i++) {
+                const key = nextKeys[i]
+                if (nextProps[key] !== prevProps[key]) return true
+            }
+            return false
+        }
+
+        function render(vnode, container) {
+            if (vnode) {
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    unmount(container._vnode)
+                }
+            }
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+        }
+
+        return {render, hydrate}
+    }
+
+    function shouldSetAsProps(el, key, value) {
+        if (key === 'form' && el.tagName === 'INPUT') return false
+        return key in el
+    }
+
+    const renderer = createRenderer({
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+        createText(text) {
+            return document.createTextNode(text)
+        },
+        setText(el, text) {
+            el.nodeValue = text
+        },
+        patchProps(el, key, prevValue, nextValue) {
+            if (/^on/.test(key)) {
+                const name = key.slice(2).toLowerCase()
+                el.addEventListener(name, nextValue)
+            } else if (shouldSetAsProps(el, key, nextValue)) {
+                const type = typeof el[key]
+                if (type === 'boolean' && nextValue === '') {
+                    el[key] = true
+                } else {
+                    el[key] = nextValue
+                }
+            } else {
+                el.setAttribute(key, nextValue)
+            }
+        }
+    })
+    const MyCompoent = {
+        name: 'MyCompoent',
+        data: () => {
+        },
+        props: {
+            title: String
+        },
+        render() {
+            return {
+                type: 'div',
+                children: "传入组件的props的数据是：" + this.title
+            }
+        }
+    }
+    const vnode = {
+        type: MyCompoent,
+        props: {
+            title: 'hello'
+        }
+    }
+    const vnode_1 = {
+        type: MyCompoent,
+        props: {
+            title: 'i am new title'
+        }
+    }
+    renderer.render(vnode, document.querySelector('#app'))
+    renderer.render(vnode_1, document.querySelector('#app'))
+</script>
+</html>
