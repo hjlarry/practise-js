@@ -1,0 +1,517 @@
+<!--组件化：KeepAlive组件实现原理 -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+
+<body>
+    <div id="app">
+    </div>
+</body>
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+<script>
+    const { reactive, effect, shallowReactive, ref, shallowReadonly } = VueReactivity
+    let currentInstance = null
+
+
+    function setCurrentInstance(instance) {
+        currentInstance = instance
+    }
+
+    function onMounted(fn) {
+        if (currentInstance) {
+            currentInstance.mounted.push(fn)
+        } else {
+            console.error('onMounted 只能在 setup 中调用')
+        }
+    }
+
+    function createRenderer(options) {
+        const {
+            createElement,
+            setElementText,
+            insert,
+            createText,
+            setText,
+            patchProps,
+        } = options
+
+        function mountElement(vnode, container, anchor) {
+            const el = vnode.el = createElement(vnode.type)
+            if (typeof vnode.children === 'string') {
+                setElementText(el, vnode.children)
+            } else if (Array.isArray(vnode.children)) {
+                vnode.children.forEach(child => {
+                    patch(null, child, el)
+                })
+            }
+
+            if (vnode.props) {
+                for (const key in vnode.props) {
+                    const value = vnode.props[key]
+                    patchProps(el, key, null, value)
+                }
+            }
+            insert(el, container, anchor)
+        }
+
+        const Fragment = Symbol()
+
+        function unmount(vnode) {
+            if (vnode.type === Fragment) {
+                vnode.children.forEach(child => {
+                    unmount(child)
+                })
+                return
+            } else if (typeof vnode.type === 'object') {
+                // 判断组件如果被KeepAlive包裹，则不真正的卸载，而是调用其_deActivate做一个搬运
+                if (vnode.shouldKeepAlive) {
+                    vnode.KeepAliveInstance._deActivate(vnode)
+                } else {
+                    unmount(vnode.component.subtree)
+                }
+                return
+            }
+            const parent = vnode.el.parentNode
+            if (parent) {
+                parent.removeChild(vnode.el)
+            }
+        }
+
+        function patchElement(n1, n2) {
+            const el = n2.el = n1.el
+            const oldProps = n1.props
+            const newProps = n2.props
+            for (const key in newProps) {
+                if (newProps[key] !== oldProps[key]) {
+                    patchProps(el, key, oldProps[key], newProps[key])
+                }
+            }
+            for (const key in oldProps) {
+                if (!(key in newProps)) {
+                    patchProps(el, key, oldProps[key], null)
+                }
+            }
+            patchChildren(n1, n2, el)
+        }
+
+        function patchChildren(n1, n2, container) {
+            if (typeof n2.children === 'string') {
+                if (Array.isArray(n1.children)) {
+                    n1.children.forEach(child => {
+                        unmount(child)
+                    })
+                }
+                setElementText(container, n2.children)
+            } else if (Array.isArray(n2.children)) {
+                const oldChildren = n1.children
+                const newChildren = n2.children
+                let lastIndex = 0
+                for (let i = 0; i < newChildren.length; i++) {
+                    const newVnode = newChildren[i]
+                    let find = false
+                    for (let j = 0; j < oldChildren.length; j++) {
+                        const oldVnode = oldChildren[j]
+                        if (newVnode.key === oldVnode.key) {
+                            find = true
+                            patch(oldVnode, newVnode, container)
+                            if (j < lastIndex) {
+                                const prevVnode = newChildren[i - 1]
+                                if (prevVnode) {
+                                    const anchor = prevVnode.el.nextSibling
+                                    insert(newVnode.el, container, anchor)
+                                }
+                            } else {
+                                lastIndex = j
+                            }
+                            break
+                        }
+                    }
+                    if (!find) {
+                        const prevVnode = newChildren[i - 1]
+                        let anchor = null
+                        if (prevVnode) {
+                            anchor = prevVnode.el.nextSibling
+                        } else {
+                            anchor = container.firstChild
+                        }
+                        patch(null, newVnode, container, anchor)
+                    }
+                }
+
+                for (let i = 0; i < oldChildren.length; i++) {
+                    const oldVnode = oldChildren[i]
+                    const has = newChildren.find(vnode => vnode.key === oldVnode.key)
+                    if (!has) {
+                        unmount(oldVnode)
+                    }
+                }
+            } else {
+                if (Array.isArray(n1.children)) {
+                    n1.children.forEach(child => {
+                        unmount(child)
+                    })
+                } else if (typeof n1.children === 'string') {
+                    setElementText(container, '')
+                }
+            }
+        }
+
+        function patch(n1, n2, container, anchor) {
+            if (n1 && n1.type !== n2.type) {
+                unmount(n1)
+                n1 = null
+            }
+
+            const { type } = n2
+            if (typeof type === 'string') {
+                if (!n1) {
+                    mountElement(n2, container, anchor)
+                } else {
+                    patchElement(n1, n2)
+                }
+            } else if (type === Text) {
+                if (!n1) {
+                    const el = n2.el = createText(n2.children)
+                    insert(el, container)
+                } else {
+                    const el = n2.el = n1.el
+                    if (n1.children !== n2.children) {
+                        setText(el, n2.children)
+                    }
+                }
+            } else if (type === Fragment) {
+                if (!n1) {
+                    n2.children.forEach(child => {
+                        patch(null, child, container)
+                    })
+                } else {
+                    patchChildren(n1, n2, container)
+                }
+            } else if (typeof type === 'object' || typeof type === 'function') {
+                if (!n1) {
+                    // 如果组件已被KeepAlive，则不会重新挂载，而是调用_activate去激活它
+                    if (n2.keptAlive) {
+                        n2.KeepAliveInstance._activate(n2, container, anchor)
+                    } else {
+                        mountComponent(n2, container, anchor)
+                    }
+                } else {
+                    patchComponent(n1, n2, anchor)
+                }
+            }
+        }
+
+        const queue = new Set()
+        let isFlushing = false
+        const p = Promise.resolve()
+
+        function queueJob(job) {
+            queue.add(job)
+            if (!isFlushing) {
+                isFlushing = true
+                p.then(() => {
+                    try {
+                        queue.forEach(job => job())
+                    } finally {
+                        isFlushing = false
+                        queue.clear = 0
+                    }
+                })
+            }
+        }
+
+        function resolveProps(options, propsData) {
+            const props = []
+            const attrs = []
+            for (const key in propsData) {
+                if (key in options || key.startsWith('on')) {
+                    props[key] = propsData[key]
+                } else {
+                    attrs[key] = propsData[key]
+                }
+            }
+            return [props, attrs]
+        }
+
+        function mountComponent(vnode, container, anchor) {
+            const compoentOptions = vnode.type
+            let {
+                render,
+                data,
+                setup,
+                props: propsOption,
+                beforeCreate,
+                created,
+                beforeMounted,
+                mounted,
+                beforeUpdate,
+                updated
+            } = compoentOptions
+            beforeCreate && beforeCreate()
+
+            const state = data ? reactive(data()) : null
+            const slots = vnode.children || {}
+            const [props, attrs] = resolveProps(propsOption, vnode.props)
+            const instance = {
+                state,
+                props: shallowReactive(props),
+                isMounted: false,
+                subtree: null,
+                slots,
+                mounted: [],
+                keepAliveCtx: null
+            }
+
+            // 判断出当前组件如果是KeepAlive组件，给其提供move和createElement方法
+            const isKeepAlive = vnode.type.__isKeepAlive
+            if (isKeepAlive) {
+                instance.keepAliveCtx = {
+                    move(vnode, container, anchor) {
+                        insert(vnode.component.subtree.el, container, anchor)
+                    },
+                    createElement
+                }
+            }
+
+            function emit(event, ...payload) {
+                const eventName = `on${event[0].toUpperCase() + event.slice(1)}`
+                const handler = instance.props[eventName]
+                if (handler) {
+                    handler(...payload)
+                } else {
+                    console.error("event is not exist")
+                }
+            }
+
+            const setupContext = { attrs, emit, slots }
+            setCurrentInstance(instance)
+            const setupResult = setup && setup(shallowReadonly(instance.props), setupContext)
+            setCurrentInstance(null)
+            let setupState = null
+            if (typeof setupResult === 'function') {
+                if (render) console.log('setup函数返回了渲染函数，render将被忽略')
+                render = setupResult
+            } else {
+                setupState = setupResult
+            }
+            vnode.component = instance
+
+            const renderContext = new Proxy(instance, {
+                get(t, k, r) {
+                    const { state, props, slots } = t
+                    if (k === '$slots') return slots
+                    if (state && k in state) {
+                        return state[k]
+                    } else if (k in props) {
+                        return props[k]
+                    } else if (setupState && k in setupState) {
+                        return setupState[k]
+                    } else {
+                        console.error('not exist')
+                    }
+                },
+                set(t, k, v, r) {
+                    const { state, props } = t
+                    if (state && k in state) {
+                        state[k] = v
+                    } else if (k in props) {
+                        console.warn('prop is readonly')
+                    } else if (setupState && k in setupState) {
+                        setupState[k] = v
+                    } else {
+                        console.error('not exist')
+                    }
+                }
+            })
+
+            created && created.call(renderContext)
+
+            effect(() => {
+                const subtree = render.call(renderContext)
+                if (!instance.isMounted) {
+                    beforeMounted && beforeMounted.call(renderContext)
+                    instance.isMounted = true
+                    patch(null, subtree, container, anchor)
+                    mounted && mounted.call(renderContext)
+                    instance.mounted && instance.mounted.forEach(hook => hook.call(renderContext))
+                } else {
+                    beforeUpdate && beforeUpdate.call(renderContext)
+                    patch(instance.subtree, subtree, container, anchor)
+                    updated && updated.call(renderContext)
+                }
+                instance.subtree = subtree
+            }, {
+                scheduler: queueJob
+            })
+        }
+
+        function patchComponent(n1, n2, anchor) {
+            const instance = (n2.component = n1.component)
+            const { props } = instance
+
+            if (hasPropsChanged(n1.props, n2.props)) {
+                const [nextProps] = resolveProps(n2.type.props, n2.props)
+                for (const key in nextProps) {
+                    props[key] = nextProps[key]
+                }
+                for (const k in props) {
+                    if (!(k in nextProps)) {
+                        delete props[k]
+                    }
+                }
+            }
+
+        }
+
+        function hasPropsChanged(prevProps, nextProps) {
+            const nextKeys = Object.keys(nextProps)
+            if (nextKeys.length !== Object.keys(prevProps).length) {
+                return true
+            }
+            for (let i = 0; i < nextKeys.length; i++) {
+                const key = nextKeys[i]
+                if (nextProps[key] !== prevProps[key]) return true
+            }
+            return false
+        }
+
+        function render(vnode, container) {
+            if (vnode) {
+                patch(container._vnode, vnode, container)
+            } else {
+                if (container._vnode) {
+                    unmount(container._vnode)
+                }
+            }
+            container._vnode = vnode
+        }
+
+        function hydrate(vnode, container) {
+        }
+
+        return { render, hydrate }
+    }
+
+    function shouldSetAsProps(el, key, value) {
+        if (key === 'form' && el.tagName === 'INPUT') return false
+        return key in el
+    }
+
+    const renderer = createRenderer({
+        createElement(tag) {
+            return document.createElement(tag)
+        },
+        setElementText(el, text) {
+            el.textContent = text
+        },
+        insert(el, parent, anchor = null) {
+            parent.insertBefore(el, anchor)
+        },
+        createText(text) {
+            return document.createTextNode(text)
+        },
+        setText(el, text) {
+            el.nodeValue = text
+        },
+        patchProps(el, key, prevValue, nextValue) {
+            if (/^on/.test(key)) {
+                const name = key.slice(2).toLowerCase()
+                el.addEventListener(name, nextValue)
+            } else if (shouldSetAsProps(el, key, nextValue)) {
+                const type = typeof el[key]
+                if (type === 'boolean' && nextValue === '') {
+                    el[key] = true
+                } else {
+                    el[key] = nextValue
+                }
+            } else {
+                el.setAttribute(key, nextValue)
+            }
+        }
+    })
+    /**
+    
+     * */
+    const KeepAlive = {
+        __isKeepAlive: true,
+        setup(props, { slots }) {
+            const cache = new Map()
+            // 渲染器会注入一个keepAliveCtx到组件的实例
+            // move函数用于移动一个dom到另一个对象上，createElement为了创建一个隐藏的容器
+            const instance = currentInstance
+            const { move, createElement } = instance.keepAliveCtx
+            const storageContainer = createElement('div')
+            // 给KeepAlive组件添加挂载、卸载方法，本质就是把原组件放到隐藏容器中
+            instance._deActivate = (vnode) => {
+                move(vnode, storageContainer)
+            }
+            instance._activate = (vnode, container, anchor) => {
+                move(vnode, container, anchor)
+            }
+            return () => {
+                // KeepAlive的插槽就是原组件，先判断如果KeepAlive包含的不是一个组件则无需缓存
+                let rawVNode = slots.default()
+                if (typeof rawVNode.type !== 'object') {
+                    return rawVNode
+                }
+                // 挂载时先看缓存里有没有，有的话说明不应该执行挂载，而应该去激活
+                // 通过keptAlive属性告诉渲染器不要重新挂载它
+                const cacheVNode = cache.get(rawVNode.type)
+                if (cacheVNode) {
+                    rawVNode.component = cacheVNode.component
+                    rawVNode.keptAlive = true
+                } else {
+                    cache.set(rawVNode.type, rawVNode)
+                }
+                // 通过shouldKeepAlive属性告诉渲染器不会真的将组件卸载掉
+                rawVNode.shouldKeepAlive = true
+                // 把keepAlive组件实例也添加到原组件的虚拟节点中，让渲染器能访问到
+                rawVNode.KeepAliveInstance = instance
+                return rawVNode
+            }
+        }
+    }
+    const MyComponent = {
+        name: 'MyComponent',
+        props: {},
+        setup(props, setupContext) {
+            const counter = ref(0)
+            return () => {
+                return {
+                    type: 'button',
+                    props: {
+                        onClick() {
+                            counter.value++
+                        }
+                    },
+                    children: `count is ${counter.value}`
+                }
+            }
+        }
+    }
+    const CompVNode = {
+        type: KeepAlive,
+        children: {
+            default() {
+                return { type: MyComponent }
+            }
+        }
+    }
+
+    renderer.render(CompVNode, document.querySelector('#app'))
+
+    setTimeout(() => {
+        renderer.render(null, document.querySelector('#app'))
+    }, 2000)
+
+    setTimeout(() => {
+        renderer.render(CompVNode, document.querySelector('#app'))
+    }, 4000)
+
+</script>
+
+</html>
