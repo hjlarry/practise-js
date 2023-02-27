@@ -1,0 +1,75 @@
+<!--组件化：动画的原生js实现 -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Title</title>
+    <style>
+      .box {
+        width: 100px;
+        height: 100px;
+        background-color: red;
+      }
+
+      .enter-active,
+      .leave-active {
+        transition: all 1s;
+      }
+
+      .enter-from,
+      .leave-to {
+        transform: translateX(200px);
+      }
+
+      .enter-to,
+      .leave-from {
+        transform: translateX(0px);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+
+  <script>
+    const container = document.querySelector("#app")
+    const el = document.createElement("div")
+    el.classList.add("box")
+
+    el.classList.add("enter-from")
+    el.classList.add("enter-active")
+
+    container.appendChild(el)
+
+    function nextFrame(cb) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(cb)
+      })
+    }
+
+    nextFrame(() => {
+      el.classList.remove("enter-from")
+      el.classList.add("enter-to")
+      el.addEventListener("transitionend", () => {
+        el.classList.remove("enter-active")
+        el.classList.remove("enter-to")
+      })
+    })
+
+    el.addEventListener("click", () => {
+      const performRemove = () => el.parentNode.removeChild(el)
+      el.classList.add("leave-from")
+      el.classList.add("leave-active")
+
+      nextFrame(() => {
+        el.classList.remove("leave-from")
+        el.classList.add("leave-to")
+        el.addEventListener("transitionend", () => {
+          el.classList.remove("leave-active")
+          el.classList.remove("leave-to")
+          performRemove()
+        })
+      })
+    })
+  </script>
+</html>
