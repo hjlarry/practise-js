@@ -1,0 +1,525 @@
+<!--组件化：Transition组件的实现 -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Title</title>
+  </head>
+  <style>
+    .box {
+      width: 100px;
+      height: 100px;
+      background-color: red;
+    }
+
+    .enter-active,
+    .leave-active {
+      transition: all 1s;
+    }
+
+    .enter-from,
+    .leave-to {
+      transform: translateX(200px);
+    }
+
+    .enter-to,
+    .leave-from {
+      transform: translateX(0px);
+    }
+  </style>
+  <body>
+    <div id="app"></div>
+  </body>
+  <script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+  <script>
+    const { reactive, effect, shallowReactive, ref, shallowReadonly } =
+      VueReactivity
+
+    let currentInstance = null
+
+    function setCurrentInstance(instance) {
+      currentInstance = instance
+    }
+
+    function onMounted(fn) {
+      if (currentInstance) {
+        currentInstance.mounted.push(fn)
+      } else {
+        console.error("onMounted 只能在 setup 中调用")
+      }
+    }
+
+    function createRenderer(options) {
+      const {
+        createElement,
+        setElementText,
+        insert,
+        createText,
+        setText,
+        patchProps,
+      } = options
+
+      function mountElement(vnode, container, anchor) {
+        const el = (vnode.el = createElement(vnode.type))
+        if (typeof vnode.children === "string") {
+          setElementText(el, vnode.children)
+        } else if (Array.isArray(vnode.children)) {
+          vnode.children.forEach((child) => {
+            patch(null, child, el)
+          })
+        }
+
+        if (vnode.props) {
+          for (const key in vnode.props) {
+            const value = vnode.props[key]
+            patchProps(el, key, null, value)
+          }
+        }
+
+        // 判断如果VNode需要过渡动画，则调用beforeEnter钩子以及enter钩子
+        const needTransition = vnode.transition
+        if (needTransition) {
+          vnode.transition.beforeEnter(el)
+        }
+
+        insert(el, container, anchor)
+        if (needTransition) {
+          vnode.transition.enter(el)
+        }
+      }
+
+      const Fragment = Symbol()
+
+      function unmount(vnode) {
+        if (vnode.type === Fragment) {
+          vnode.children.forEach((child) => {
+            unmount(child)
+          })
+          return
+        }
+        const needTransition = vnode.transition
+        const parent = vnode.el.parentNode
+        if (parent) {
+          // 将卸载动作封装成一个函数，如果需要过渡则调用leave钩子传入该函数
+          const performRemove = () => parent.removeChild(vnode.el)
+          if (needTransition) {
+            vnode.transition.leave(vnode.el, performRemove)
+          } else {
+            performRemove()
+          }
+        }
+      }
+
+      function patchElement(n1, n2) {
+        const el = (n2.el = n1.el)
+        const oldProps = n1.props
+        const newProps = n2.props
+        for (const key in newProps) {
+          if (newProps[key] !== oldProps[key]) {
+            patchProps(el, key, oldProps[key], newProps[key])
+          }
+        }
+        for (const key in oldProps) {
+          if (!(key in newProps)) {
+            patchProps(el, key, oldProps[key], null)
+          }
+        }
+        patchChildren(n1, n2, el)
+      }
+
+      function patchChildren(n1, n2, container) {
+        if (typeof n2.children === "string") {
+          if (Array.isArray(n1.children)) {
+            n1.children.forEach((child) => {
+              unmount(child)
+            })
+          }
+          setElementText(container, n2.children)
+        } else if (Array.isArray(n2.children)) {
+          const oldChildren = n1.children
+          const newChildren = n2.children
+          let lastIndex = 0
+          for (let i = 0; i < newChildren.length; i++) {
+            const newVnode = newChildren[i]
+            let find = false
+            for (let j = 0; j < oldChildren.length; j++) {
+              const oldVnode = oldChildren[j]
+              if (newVnode.key === oldVnode.key) {
+                find = true
+                patch(oldVnode, newVnode, container)
+                if (j < lastIndex) {
+                  const prevVnode = newChildren[i - 1]
+                  if (prevVnode) {
+                    const anchor = prevVnode.el.nextSibling
+                    insert(newVnode.el, container, anchor)
+                  }
+                } else {
+                  lastIndex = j
+                }
+                break
+              }
+            }
+            if (!find) {
+              const prevVnode = newChildren[i - 1]
+              let anchor = null
+              if (prevVnode) {
+                anchor = prevVnode.el.nextSibling
+              } else {
+                anchor = container.firstChild
+              }
+              patch(null, newVnode, container, anchor)
+            }
+          }
+
+          for (let i = 0; i < oldChildren.length; i++) {
+            const oldVnode = oldChildren[i]
+            const has = newChildren.find((vnode) => vnode.key === oldVnode.key)
+            if (!has) {
+              unmount(oldVnode)
+            }
+          }
+        } else {
+          if (Array.isArray(n1.children)) {
+            n1.children.forEach((child) => {
+              unmount(child)
+            })
+          } else if (typeof n1.children === "string") {
+            setElementText(container, "")
+          }
+        }
+      }
+
+      function patch(n1, n2, container, anchor) {
+        if (n1 && n1.type !== n2.type) {
+          unmount(n1)
+          n1 = null
+        }
+
+        const { type } = n2
+        if (typeof type === "string") {
+          if (!n1) {
+            mountElement(n2, container, anchor)
+          } else {
+            patchElement(n1, n2)
+          }
+        } else if (type === Text) {
+          if (!n1) {
+            const el = (n2.el = createText(n2.children))
+            insert(el, container)
+          } else {
+            const el = (n2.el = n1.el)
+            if (n1.children !== n2.children) {
+              setText(el, n2.children)
+            }
+          }
+        } else if (type === Fragment) {
+          if (!n1) {
+            n2.children.forEach((child) => {
+              patch(null, child, container)
+            })
+          } else {
+            patchChildren(n1, n2, container)
+          }
+        } else if (typeof type === "object") {
+          if (!n1) {
+            mountComponent(n2, container, anchor)
+          } else {
+            patchComponent(n1, n2, anchor)
+          }
+        }
+      }
+
+      const queue = new Set()
+      let isFlushing = false
+      const p = Promise.resolve()
+
+      function queueJob(job) {
+        queue.add(job)
+        if (!isFlushing) {
+          isFlushing = true
+          p.then(() => {
+            try {
+              queue.forEach((job) => job())
+            } finally {
+              isFlushing = false
+              queue.clear = 0
+            }
+          })
+        }
+      }
+
+      function resolveProps(options, propsData) {
+        const props = []
+        const attrs = []
+        for (const key in propsData) {
+          if (key in options || key.startsWith("on")) {
+            props[key] = propsData[key]
+          } else {
+            attrs[key] = propsData[key]
+          }
+        }
+        return [props, attrs]
+      }
+
+      function mountComponent(vnode, container, anchor) {
+        const compoentOptions = vnode.type
+        let {
+          render,
+          data,
+          setup,
+          props: propsOption,
+          beforeCreate,
+          created,
+          beforeMounted,
+          mounted,
+          beforeUpdate,
+          updated,
+        } = compoentOptions
+        beforeCreate && beforeCreate()
+
+        const state = data ? reactive(data()) : null
+        const slots = vnode.children || {}
+        const [props, attrs] = resolveProps(propsOption, vnode.props)
+        const instance = {
+          state,
+          props: shallowReactive(props),
+          isMounted: false,
+          subtree: null,
+          slots,
+          // 组件实例中的mounted数组，存储通过onMounted函数注册的生命周期钩子函数
+          mounted: [],
+        }
+
+        function emit(event, ...payload) {
+          const eventName = `on${event[0].toUpperCase() + event.slice(1)}`
+          const handler = instance.props[eventName]
+          if (handler) {
+            handler(...payload)
+          } else {
+            console.error("event is not exist")
+          }
+        }
+
+        const setupContext = { attrs, emit, slots }
+        setCurrentInstance(instance)
+        const setupResult =
+          setup && setup(shallowReadonly(instance.props), setupContext)
+        setCurrentInstance(null)
+        let setupState = null
+        if (typeof setupResult === "function") {
+          if (render) console.log("setup函数返回了渲染函数，render将被忽略")
+          render = setupResult
+        } else {
+          setupState = setupResult
+        }
+        vnode.component = instance
+
+        const renderContext = new Proxy(instance, {
+          get(t, k, r) {
+            const { state, props, slots } = t
+            if (k === "$slots") return slots
+            if (state && k in state) {
+              return state[k]
+            } else if (k in props) {
+              return props[k]
+            } else if (setupState && k in setupState) {
+              return setupState[k]
+            } else {
+              console.error("not exist")
+            }
+          },
+          set(t, k, v, r) {
+            const { state, props } = t
+            if (state && k in state) {
+              state[k] = v
+            } else if (k in props) {
+              console.warn("prop is readonly")
+            } else if (setupState && k in setupState) {
+              setupState[k] = v
+            } else {
+              console.error("not exist")
+            }
+          },
+        })
+
+        created && created.call(renderContext)
+
+        effect(
+          () => {
+            const subtree = render.call(renderContext)
+            if (!instance.isMounted) {
+              beforeMounted && beforeMounted.call(renderContext)
+              instance.isMounted = true
+              patch(null, subtree, container, anchor)
+              mounted && mounted.call(renderContext)
+              instance.mounted &&
+                instance.mounted.forEach((hook) => hook.call(renderContext))
+            } else {
+              beforeUpdate && beforeUpdate.call(renderContext)
+              patch(instance.subtree, subtree, container, anchor)
+              updated && updated.call(renderContext)
+            }
+            instance.subtree = subtree
+          },
+          {
+            scheduler: queueJob,
+          }
+        )
+      }
+
+      function patchComponent(n1, n2, anchor) {
+        const instance = (n2.component = n1.component)
+        const { props } = instance
+
+        if (hasPropsChanged(n1.props, n2.props)) {
+          const [nextProps] = resolveProps(n2.type.props, n2.props)
+          for (const key in nextProps) {
+            props[key] = nextProps[key]
+          }
+          for (const k in props) {
+            if (!(k in nextProps)) {
+              delete props[k]
+            }
+          }
+        }
+      }
+
+      function hasPropsChanged(prevProps, nextProps) {
+        const nextKeys = Object.keys(nextProps)
+        if (nextKeys.length !== Object.keys(prevProps).length) {
+          return true
+        }
+        for (let i = 0; i < nextKeys.length; i++) {
+          const key = nextKeys[i]
+          if (nextProps[key] !== prevProps[key]) return true
+        }
+        return false
+      }
+
+      function render(vnode, container) {
+        if (vnode) {
+          patch(container._vnode, vnode, container)
+        } else {
+          if (container._vnode) {
+            unmount(container._vnode)
+          }
+        }
+        container._vnode = vnode
+      }
+
+      function hydrate(vnode, container) {}
+
+      return { render, hydrate }
+    }
+
+    function shouldSetAsProps(el, key, value) {
+      if (key === "form" && el.tagName === "INPUT") return false
+      return key in el
+    }
+
+    const renderer = createRenderer({
+      createElement(tag) {
+        return document.createElement(tag)
+      },
+      setElementText(el, text) {
+        el.textContent = text
+      },
+      insert(el, parent, anchor = null) {
+        parent.insertBefore(el, anchor)
+      },
+      createText(text) {
+        return document.createTextNode(text)
+      },
+      setText(el, text) {
+        el.nodeValue = text
+      },
+      patchProps(el, key, prevValue, nextValue) {
+        if (/^on/.test(key)) {
+          const name = key.slice(2).toLowerCase()
+          el.addEventListener(name, nextValue)
+        } else if (shouldSetAsProps(el, key, nextValue)) {
+          const type = typeof el[key]
+          if (type === "boolean" && nextValue === "") {
+            el[key] = true
+          } else {
+            el[key] = nextValue
+          }
+        } else {
+          el.setAttribute(key, nextValue)
+        }
+      },
+    })
+    /**
+    
+     * */
+    function nextFrame(cb) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(cb)
+      })
+    }
+    const Transition = {
+      name: "Transition",
+      setup(props, { slots }) {
+        return () => {
+          const innerVNode = slots.default()
+          innerVNode.transition = {
+            beforeEnter(el) {
+              el.classList.add("enter-from")
+              el.classList.add("enter-active")
+            },
+            enter(el) {
+              nextFrame(() => {
+                el.classList.remove("enter-from")
+                el.classList.add("enter-to")
+                el.addEventListener("transitionend", () => {
+                  el.classList.remove("enter-active")
+                  el.classList.remove("enter-to")
+                })
+              })
+            },
+            leave(el, performRemove) {
+              el.classList.add("leave-from")
+              el.classList.add("leave-active")
+
+              nextFrame(() => {
+                el.classList.remove("leave-from")
+                el.classList.add("leave-to")
+                el.addEventListener("transitionend", () => {
+                  el.classList.remove("leave-active")
+                  el.classList.remove("leave-to")
+                  performRemove()
+                })
+              })
+            },
+          }
+          return innerVNode
+        }
+      },
+    }
+
+    const App = {
+      name: "App",
+      setup() {
+        const toggle = ref(true)
+
+        setTimeout(() => {
+          toggle.value = false
+        }, 2000)
+
+        return () => {
+          return {
+            type: Transition,
+            children: {
+              default() {
+                return toggle.value
+                  ? { type: "div", props: { class: "box" } }
+                  : { type: Text, children: "leave" }
+              },
+            },
+          }
+        }
+      },
+    }
+    renderer.render({ type: App }, document.querySelector("#app"))
+  </script>
+</html>
